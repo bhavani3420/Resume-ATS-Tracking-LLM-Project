@@ -1,53 +1,98 @@
 import streamlit as st
 import google.generativeai as genai
 import os
-import PyPDF2 as pdf
+import io
+from PyPDF2 import PdfReader
 from dotenv import load_dotenv
 import json
 
-load_dotenv() ## load all our environment variables
+# Load environment variables
+load_dotenv()
 
+# Configure Gemini API
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
-# Gemini Pro Response
-def get_gemini_repsonse(input):
-    # Assigning the Model
-    model=genai.GenerativeModel('gemini-pro')
-    response=model.generate_content(input)
+# -------- GEMINI RESPONSE FUNCTION --------
+def get_gemini_response(prompt):
+    model = genai.GenerativeModel("gemini-pro")
+    response = model.generate_content(prompt)
     return response.text
 
-# Extract and concatenate text from all pages of the given PDF file
+
+# -------- PDF TEXT EXTRACTION --------
 def input_pdf_text(uploaded_file):
-    reader=pdf.PdfReader(uploaded_file)
-    text=""
-    # Iterate through all the pages
-    for page in range(len(reader.pages)):
-        page=reader.pages[page]
-        # Extracting the text
-        text+=str(page.extract_text())
+    text = ""
+
+    # Read file as bytes (IMPORTANT for Streamlit Cloud)
+    pdf_bytes = uploaded_file.read()
+    pdf_stream = io.BytesIO(pdf_bytes)
+
+    reader = PdfReader(pdf_stream)
+    for page in reader.pages:
+        text += page.extract_text() or ""
+
     return text
 
-#Prompt Template --> The Better the prompt better is the result
-input_prompt="""
-Hey Act Like a skilled or very experienced ATS(Application Tracking System) with a deep understanding of the tech field, software engineering, data science, data analysis and big data engineering. Your task is to evaluate the resume based on the given job description.
-You must consider the job market is very competitive and you should provide the best assistance for improving the resumes. Assign the percentage Matching based on the Job description and the missing keywords with high accuracy.  
-resume:{text}
-description:{jd}
 
-I want the response in one single string having the structure
-{{"JD Match":"%","MissingKeywords:[]","Profile Summary":""}}
+# -------- PROMPT TEMPLATE --------
+input_prompt = """
+You are a highly skilled ATS (Applicant Tracking System) with expertise in:
+Software Engineering, AI/ML, Data Science, Data Analysis, and Big Data.
+
+Evaluate the resume against the given job description.
+The job market is very competitive, so provide accurate analysis.
+
+Resume:
+{text}
+
+Job Description:
+{jd}
+
+Return the response strictly in the following JSON format:
+{{
+  "JD Match": "XX%",
+  "Missing Keywords": [],
+  "Profile Summary": ""
+}}
 """
 
-## Creating the Streamlit App
-st.title("Smart ATS")
-st.text("Improve Your Resume ATS")
-jd=st.text_area("Paste the Job Description")
-uploaded_file=st.file_uploader("Upload Your Resume",type="pdf",help="Please uplaod the pdf")
 
-submit = st.button("Submit")
+# -------- STREAMLIT UI --------
+st.set_page_config(page_title="Smart ATS", page_icon="📄", layout="centered")
 
+st.title("📄 Smart ATS Resume Analyzer")
+st.write("Improve your resume using AI-powered ATS evaluation")
+
+jd = st.text_area("📌 Paste Job Description Here")
+uploaded_file = st.file_uploader(
+    "📎 Upload Your Resume (PDF only)", type=["pdf"]
+)
+
+submit = st.button("🔍 Analyze Resume")
+
+
+# -------- MAIN LOGIC --------
 if submit:
-    if uploaded_file is not None:
-        text=input_pdf_text(uploaded_file)
-        response=get_gemini_repsonse(input_prompt)
-        st.subheader(response)
+    if uploaded_file is None:
+        st.warning("⚠️ Please upload a resume PDF.")
+    elif jd.strip() == "":
+        st.warning("⚠️ Please paste the job description.")
+    else:
+        with st.spinner("Analyzing resume with AI..."):
+            resume_text = input_pdf_text(uploaded_file)
+
+            final_prompt = input_prompt.format(
+                text=resume_text,
+                jd=jd
+            )
+
+            response = get_gemini_response(final_prompt)
+
+        st.subheader("📊 ATS Evaluation Result")
+
+        # Try to format JSON output nicely
+        try:
+            response_json = json.loads(response)
+            st.json(response_json)
+        except:
+            st.write(response)
